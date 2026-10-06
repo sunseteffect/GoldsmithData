@@ -3,7 +3,7 @@
 ## Notes: Daily auction house price data for Goldsmith (region-wide commodities)
 ## Author: sunseteffect
 ## Version: @version@
-## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
+## IconTexture: Interface\AddOns\GoldsmithData\Media\Logo
 
 Data_US.lua
 Data_EU.lua

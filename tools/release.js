@@ -98,7 +98,7 @@ async function main() {
     }
     if (files.length === 0) throw new Error(`No Data_*.lua files in ${opts.data}`);
 
-    // dist/GoldsmithData/: the TOC with the version filled in, and the data
+    // dist/GoldsmithData/: the TOC with the version filled in, the logo, and the data
     const d = new Date();
     const version = `${d.getUTCFullYear()}.${pad(d.getUTCMonth() + 1)}.${pad(d.getUTCDate())}.${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`;
     const dist = path.join(ROOT, 'dist');
@@ -107,6 +107,8 @@ async function main() {
     fs.mkdirSync(pkg, { recursive: true });
     const toc = fs.readFileSync(path.join(ROOT, `${NAME}.toc`), 'utf8').replace('@version@', version);
     fs.writeFileSync(path.join(pkg, `${NAME}.toc`), toc);
+    fs.mkdirSync(path.join(pkg, 'Media'));
+    fs.copyFileSync(path.join(ROOT, 'Media', 'Logo.tga'), path.join(pkg, 'Media', 'Logo.tga'));
     for (const file of files) fs.copyFileSync(file, path.join(pkg, path.basename(file)));
     const zip = path.join(dist, `${NAME}-${version}.zip`);
     execFileSync('zip', ['-rq', path.basename(zip), NAME], { cwd: dist });

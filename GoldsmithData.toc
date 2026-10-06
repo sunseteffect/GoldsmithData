@@ -1,0 +1,11 @@
+## Interface: 120100
+## Title: Goldsmith Data
+## Notes: Daily auction house price data for Goldsmith (region-wide commodities)
+## Author: sunseteffect
+## Version: @version@
+## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
+
+Data_US.lua
+Data_EU.lua
+Data_KR.lua
+Data_TW.lua

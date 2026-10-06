@@ -1,0 +1,88 @@
+# Hourly: fetch every region's commodity auctions (prices, and listings to
+# compare with next hour for sales). Daily: release a new Goldsmith Data
+# version to CurseForge (tools/release.js decides when one is due).
+#
+# Repository secrets: BLIZZARD_CLIENT_ID, BLIZZARD_CLIENT_SECRET (from
+# develop.battle.net), CF_API_TOKEN (CurseForge account > API tokens) and
+# CF_PROJECT_ID (the Goldsmith Data project's ID). Until the CurseForge ones
+# are set, releases are built but not uploaded.
+#
+# What carries over between runs (listings, snapshots, the region files, the
+# last release time) is kept in the Actions cache under state/.
+name: Price data
+
+on:
+  schedule:
+    - cron: '20 * * * *'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release to CurseForge now, even if one went out today
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write   # to delete old state caches
+
+concurrency:
+  group: price-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install luac (syntax check of the generated files)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends lua5.1 > /dev/null
+
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - name: Fetch
+        id: fetch
+        continue-on-error: true
+        env:
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+        run: node tools/fetch.js --out state/data --state state
+
+      - name: Release
+        id: release
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_PROJECT_ID: ${{ secrets.CF_PROJECT_ID }}
+        run: node tools/release.js --data state/data --state state ${{ inputs.release && '--force' || '' }}
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+
+      - name: Delete older state caches
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list --key state- --sort created_at --order desc --limit 100 --json id --jq '.[3:][].id' \
+            | xargs -r -n1 gh cache delete || true
+
+      - name: Fail if fetching or releasing failed
+        if: steps.fetch.outcome == 'failure' || steps.release.outcome == 'failure'
+        run: |
+          echo "::error::Fetch: ${{ steps.fetch.outcome }}, release: ${{ steps.release.outcome }} (see those steps)"
+          exit 1

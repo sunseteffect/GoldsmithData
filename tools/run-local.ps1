@@ -56,7 +56,9 @@ try {
     $state = if ($State) { $State } else { Join-Path $env:LOCALAPPDATA 'Goldsmith\data' }
     $luac = 'C:\Program Files (x86)\Lua\5.1\luac.exe'
     if (Test-Path $luac) { $env:LUAC = $luac }
-    & node (Join-Path $PSScriptRoot 'fetch.js') --regions $Regions --out $out --state $state
+    # Raw US listings for 3 days (gzipped, ~150 MB), to tune the sales rules
+    # against TSM offline
+    & node (Join-Path $PSScriptRoot 'fetch.js') --regions $Regions --out $out --state $state --keep-listings us:72
     exit $LASTEXITCODE
 }
 finally {

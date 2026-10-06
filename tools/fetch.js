@@ -15,6 +15,8 @@
 //   --force                write even if Blizzard hasn't published new data
 //   --from-file FILE       testing: read a saved commodities JSON (one region)
 //   --keep-days N          days of hourly snapshots to keep (default 14)
+//   --keep-listings R:H    also keep region R's raw hourly listings (gzipped)
+//                          for H hours, to replay sales rules offline (us:72)
 //
 // Ported from Goldsmith's Tools\Fetch-PriceData.ps1 (same rules and output).
 'use strict';
@@ -29,7 +31,7 @@ const MAX_GAP = 180; // minutes; listings further apart than this aren't compare
 
 function parseArgs(argv) {
     const opts = { regions: Object.keys(REGION_IDS), out: path.join(__dirname, '..'),
-        state: path.join(process.cwd(), 'state'), force: false, fromFile: null, keepDays: 14 };
+        state: path.join(process.cwd(), 'state'), force: false, fromFile: null, keepDays: 14, keepListings: {} };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--regions') opts.regions = argv[++i].split(',').map(s => s.trim().toLowerCase());
@@ -38,6 +40,12 @@ function parseArgs(argv) {
         else if (a === '--force') opts.force = true;
         else if (a === '--from-file') opts.fromFile = argv[++i];
         else if (a === '--keep-days') opts.keepDays = Number(argv[++i]);
+        else if (a === '--keep-listings') {
+            for (const part of argv[++i].split(',')) {
+                const [r, h] = part.split(':');
+                opts.keepListings[r.trim().toLowerCase()] = Number(h);
+            }
+        }
         else throw new Error(`Unknown option ${a}`);
     }
     for (const r of opts.regions) if (!REGION_IDS[r]) throw new Error(`Unknown region ${r}`);
@@ -273,6 +281,20 @@ async function fetchRegion(region, opts, token) {
     const tsv = [`# ${lastModified}`];
     for (const [id, c] of listings) tsv.push(`${id}\t${c[0]}\t${c[1]}\t${c[2]}\t${c[3]}`);
     writeAtomic(listFile, tsv.join('\n') + '\n');
+
+    // Raw listings history, for trying other sales rules offline
+    const keepHours = opts.keepListings[region];
+    if (keepHours > 0) {
+        const histDir = path.join(stateDir, 'listings-history');
+        fs.mkdirSync(histDir, { recursive: true });
+        const name = snapName.replace(/\.csv$/, '.tsv.gz');
+        fs.writeFileSync(path.join(histDir, name), require('zlib').gzipSync(tsv.join('\n') + '\n'));
+        const keepFrom = Date.now() - keepHours * 3600000;
+        for (const f of fs.readdirSync(histDir)) {
+            const file = path.join(histDir, f);
+            if (fs.statSync(file).mtimeMs < keepFrom) fs.unlinkSync(file);
+        }
+    }
 
     fs.writeFileSync(stateFile, lastModified + '\n');
     let sold = 0;

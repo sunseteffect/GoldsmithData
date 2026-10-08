@@ -8,7 +8,7 @@ Goldsmith installs this for you as a required dependency. It has no window or se
 
 A GitHub Actions workflow runs every hour:
 
-1. `tools/fetch.js` downloads each region's commodity auctions from the Blizzard Game Data API and works out, per item, the lowest price, the market price (average of the cheapest 15% of units), the median and the units listed. It also compares the listings with the previous hour's to estimate what sold (kept for sales history; not shipped yet).
+1. `tools/fetch.js` downloads each region's commodity auctions from the Blizzard Game Data API and works out, per item, the lowest price, the market price (average of the cheapest 15% of units), the median and the units listed. It also compares the listings with the previous hour's to estimate what sold, and from the last 7 days of that gives each item a sell level: **sells**, **slow** or **hardly sells**. Goldsmith uses the levels to leave out crafts that won't sell when TSM isn't installed.
 2. Once a day, `tools/release.js` packages the four region files and uploads a new version to CurseForge.
 
 Each region's file only builds its table when you play in that region, so the others cost almost nothing.

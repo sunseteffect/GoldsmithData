@@ -31,7 +31,9 @@ concurrency:
 
 jobs:
   fetch:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to a new release (2026-10-19) that may not
+    # package lua5.1. Move up once a newer image is checked.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

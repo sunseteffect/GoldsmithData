@@ -31,8 +31,10 @@ if ($SetCredentials) {
 }
 
 if ($Install) {
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
+    # Through run-hidden.vbs: -WindowStyle Hidden still flashed a window
+    # and took focus every hour
+    $launcher = Join-Path $PSScriptRoot 'run-hidden.vbs'
+    $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "//B //NoLogo `"$launcher`""
     $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(15)) `
         -RepetitionInterval (New-TimeSpan -Hours 1)
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 20)

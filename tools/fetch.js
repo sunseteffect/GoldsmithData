@@ -15,6 +15,8 @@
 //   --force                write even if Blizzard hasn't published new data
 //   --from-file FILE       testing: read a saved commodities JSON (one region)
 //   --keep-days N          days of hourly snapshots to keep (default 14)
+//   --keep-archive-days N  days of the compact daily archive to keep (default
+//                          0: forever)
 //   --keep-listings R:H    also keep region R's raw hourly listings (gzipped)
 //                          for H hours, to replay sales rules offline (us:72)
 //
@@ -44,7 +46,8 @@ const NONE_HOUR_SHARE = 0.05;  // or in under 1 hour in 20
 
 function parseArgs(argv) {
     const opts = { regions: Object.keys(REGION_IDS), out: path.join(__dirname, '..'),
-        state: path.join(process.cwd(), 'state'), force: false, fromFile: null, keepDays: 14, keepListings: {} };
+        state: path.join(process.cwd(), 'state'), force: false, fromFile: null, keepDays: 14, keepArchiveDays: 0,
+        keepListings: {} };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--regions') opts.regions = argv[++i].split(',').map(s => s.trim().toLowerCase());
@@ -53,6 +56,7 @@ function parseArgs(argv) {
         else if (a === '--force') opts.force = true;
         else if (a === '--from-file') opts.fromFile = argv[++i];
         else if (a === '--keep-days') opts.keepDays = Number(argv[++i]);
+        else if (a === '--keep-archive-days') opts.keepArchiveDays = Number(argv[++i]);
         else if (a === '--keep-listings') {
             for (const part of argv[++i].split(',')) {
                 const [r, h] = part.split(':');
@@ -186,6 +190,97 @@ function sellLevels(snapDir, near, now) {
         levels.set(item, level);
     }
     return { levels, salePrices, hours };
+}
+
+// Compact daily archive, kept far longer than the snapshots: the history for
+// time-of-week patterns (when an item is cheapest or sells most), which need
+// many weeks, each kept separately so we can check a pattern repeats. One file
+// per UTC day, written from the hourly snapshots once the day is over (so the
+// first run archives every finished day still in the snapshots):
+//   archive/YYYY-MM-DD.tsv.gz
+//   # hours 0:60 1:60 2: ...   hour:minutes compared (blank: sales not known)
+//   item <TAB> min <TAB> market <TAB> quantity <TAB> near <TAB> sold <TAB> sold_value
+// each column 24 values (UTC hours 0-23) separated by spaces: "-" = no
+// snapshot or no listing that hour, "=" = same as the hour before. Two
+// snapshots in one hour: the later one counts.
+const ARCHIVE_COLS = [1, 2, 4, 13, 5, 6]; // snapshot columns, in archive order
+
+function archiveDays(snapDir, archDir, now, keepDays) {
+    fs.mkdirSync(archDir, { recursive: true });
+    const today = new Date(now).toISOString().slice(0, 10);
+    const byDay = new Map(); // day -> [snapshot file names]
+    for (const f of fs.readdirSync(snapDir).sort()) {
+        if (!/^\d{4}-\d\d-\d\d_\d{4}\.csv$/.test(f)) continue;
+        const day = f.slice(0, 10);
+        if (day >= today || fs.existsSync(path.join(archDir, `${day}.tsv.gz`))) continue;
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(f);
+    }
+    const written = [];
+    for (const [day, files] of byDay) {
+        const items = new Map(); // item -> [column][hour]
+        const minutes = Array(24).fill(null);
+        for (const f of files) {
+            const hour = Number(f.slice(11, 13));
+            const lines = fs.readFileSync(path.join(snapDir, f), 'utf8').split(/\r?\n/);
+            minutes[hour] = (lines[1] || '').split(',')[12] || '';
+            for (const o of items.values()) for (const col of o) col[hour] = '-';
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i]) continue;
+                const c = lines[i].split(',');
+                let o = items.get(c[0]);
+                if (!o) { o = ARCHIVE_COLS.map(() => Array(24).fill('-')); items.set(c[0], o); }
+                ARCHIVE_COLS.forEach((k, j) => { o[j][hour] = c[k] === undefined || c[k] === '' ? '-' : c[k]; });
+            }
+        }
+        const out = [`# hours ${minutes.map((m, h) => m === null ? null : `${h}:${m}`).filter(Boolean).join(' ')}`];
+        for (const [item, cols] of [...items].sort((a, b) => a[0] - b[0])) {
+            out.push(item + '\t' + cols.map(col => {
+                let prev = null;
+                return col.map(v => { if (v === prev && v !== '-') return '='; prev = v; return v; }).join(' ');
+            }).join('\t'));
+        }
+        const file = path.join(archDir, `${day}.tsv.gz`);
+        fs.writeFileSync(file + '.tmp', require('zlib').gzipSync(out.join('\n') + '\n', { level: 9 }));
+        fs.renameSync(file + '.tmp', file);
+        written.push(day);
+    }
+    if (keepDays > 0) {
+        const keepFrom = new Date(now - keepDays * 86400000).toISOString().slice(0, 10);
+        for (const f of fs.readdirSync(archDir)) {
+            if (/^\d{4}-\d\d-\d\d\.tsv\.gz$/.test(f) && f.slice(0, 10) < keepFrom) fs.unlinkSync(path.join(archDir, f));
+        }
+    }
+    return written;
+}
+
+// Reads one archive day: { minutes: [24] (null: no snapshot), items: Map(item ->
+// { min, market, quantity, near, sold, soldValue }: arrays of 24, null where
+// "-") }. For the pattern tools.
+function readArchive(file) {
+    const lines = require('zlib').gunzipSync(fs.readFileSync(file)).toString('utf8').split('\n');
+    const minutes = Array(24).fill(null);
+    for (const part of lines[0].replace(/^# hours ?/, '').split(' ').filter(Boolean)) {
+        const [h, m] = part.split(':');
+        minutes[Number(h)] = m === '' ? '' : Number(m);
+    }
+    const names = ['min', 'market', 'quantity', 'near', 'sold', 'soldValue'];
+    const items = new Map();
+    for (let i = 1; i < lines.length; i++) {
+        if (!lines[i]) continue;
+        const f = lines[i].split('\t');
+        const o = {};
+        names.forEach((name, j) => {
+            let prev = null;
+            o[name] = f[j + 1].split(' ').map(v => {
+                if (v === '=') return prev;
+                prev = v === '-' ? null : Number(v);
+                return prev;
+            });
+        });
+        items.set(Number(f[0]), o);
+    }
+    return { minutes, items };
 }
 
 async function fetchRegion(region, opts, token) {
@@ -359,6 +454,14 @@ async function fetchRegion(region, opts, token) {
         const file = path.join(snapDir, f);
         if (f.endsWith('.csv') && fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
     }
+    //    Finished days into the long-term archive (a failure here mustn't
+    //    stop the data file)
+    let archived = [];
+    try {
+        archived = archiveDays(snapDir, path.join(stateDir, 'archive'), Date.now(), opts.keepArchiveDays);
+    } catch (e) {
+        log(`Archive failed: ${e.message}`);
+    }
 
     // 5. The data file. Levels only once there's enough history (sellLevels)
     const sell = sellLevels(snapDir, near, Date.now());
@@ -415,7 +518,8 @@ async function fetchRegion(region, opts, token) {
         for (const level of sell.levels.values()) n[level]++;
         levels = `, levels from ${sell.hours} h: ${n[3]} sell, ${n[2]} slow, ${n[1]} hardly`;
     }
-    log(`OK: ${count} auctions, ${items.size} items -> ${path.basename(outFile)} (Last-Modified ${lastModified})${compared}${levels}`);
+    const arch = archived.length ? `, archived ${archived.join(', ')}` : '';
+    log(`OK: ${count} auctions, ${items.size} items -> ${path.basename(outFile)} (Last-Modified ${lastModified})${compared}${levels}${arch}`);
 }
 
 async function main() {
@@ -439,4 +543,4 @@ if (require.main === module) {
     main().catch(e => { console.error(`FAILED: ${e.message}`); process.exitCode = 1; });
 }
 
-module.exports = { roundHalfEven, sellLevels };
+module.exports = { roundHalfEven, sellLevels, archiveDays, readArchive };

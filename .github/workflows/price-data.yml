@@ -58,7 +58,9 @@ jobs:
         env:
           BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
           BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
-        run: node tools/fetch.js --out state/data --state state
+        # Archive: ~3 MB a day for all regions; 120 days keeps the cache small
+        # (the PC's hourly task keeps its archive forever)
+        run: node tools/fetch.js --out state/data --state state --keep-archive-days 120
 
       - name: Release
         id: release

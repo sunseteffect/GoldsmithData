@@ -18,14 +18,24 @@ param(
     [string]$State
 )
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Security
 
-# Stored with Windows DPAPI: only this Windows user on this PC can read it
-$credFile = Join-Path $env:LOCALAPPDATA 'Goldsmith\blizzard-api.xml'
+# Stored with Windows DPAPI at machine scope, in this user's profile folder.
+# The task runs logged off without a stored password (S4U), and that can't
+# open user-scope DPAPI like the old Export-Clixml file (2026-10-14)
+$credFile = Join-Path $env:LOCALAPPDATA 'Goldsmith\blizzard-api.bin'
+$oldCredFile = Join-Path $env:LOCALAPPDATA 'Goldsmith\blizzard-api.xml'
 $taskName = 'Goldsmith Price Data'
 
-if ($SetCredentials) {
+function Save-BlizzardCredential([pscredential]$cred) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($cred.UserName + "`n" + $cred.GetNetworkCredential().Password)
     New-Item -ItemType Directory -Force (Split-Path $credFile) | Out-Null
-    Get-Credential -Message 'Blizzard API: user name = Client ID, password = Client Secret' | Export-Clixml $credFile
+    [IO.File]::WriteAllBytes($credFile,
+        [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'LocalMachine'))
+}
+
+if ($SetCredentials) {
+    Save-BlizzardCredential (Get-Credential -Message 'Blizzard API: user name = Client ID, password = Client Secret')
     Write-Host "Saved to $credFile"
     return
 }
@@ -38,8 +48,12 @@ if ($Install) {
     $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(15)) `
         -RepetitionInterval (New-TimeSpan -Hours 1)
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Write-Host "Installed scheduled task '$taskName' (hourly at :15, while you're logged in)"
+    # S4U: runs whether you're logged in or not, so a Windows Update restart
+    # overnight doesn't stop it until the next login; no password to store
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
+        -Principal $principal -Force -ErrorAction Stop | Out-Null
+    Write-Host "Installed scheduled task '$taskName' (hourly at :15, logged in or not)"
     return
 }
 if ($Uninstall) {
@@ -48,10 +62,14 @@ if ($Uninstall) {
     return
 }
 
+if (-not (Test-Path $credFile) -and (Test-Path $oldCredFile)) {
+    # One-time move from the old user-scope file; works only while logged in
+    Save-BlizzardCredential (Import-Clixml $oldCredFile)
+    Remove-Item $oldCredFile
+}
 if (-not (Test-Path $credFile)) { throw "No credentials. Run: .\run-local.ps1 -SetCredentials" }
-$cred = Import-Clixml $credFile
-$env:BLIZZARD_CLIENT_ID = $cred.UserName
-$env:BLIZZARD_CLIENT_SECRET = $cred.GetNetworkCredential().Password
+$env:BLIZZARD_CLIENT_ID, $env:BLIZZARD_CLIENT_SECRET = [Text.Encoding]::UTF8.GetString(
+    [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($credFile), $null, 'LocalMachine')) -split "`n", 2
 try {
     $addonDir = Split-Path $PSScriptRoot -Parent
     $out = if ($Out) { $Out } else { $addonDir }

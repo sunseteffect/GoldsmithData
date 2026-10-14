@@ -166,30 +166,34 @@ function sellLevels(snapDir, near, now) {
         }
     }
     if (hours < LEVEL_MIN_HOURS) return null;
-    const days = hours / 24;
     const levels = new Map();
     const salePrices = new Map();
     for (const [item, units] of near) {
         const o = perItem.get(item);
-        let level = LEVEL.none;
-        if (o) {
-            const sorted = [...o.hourly].sort((a, b) => a - b);
-            const cap = Math.max(sorted[Math.floor(sorted.length / 2)] * SPIKE_CAP, 1);
-            const perDay = o.hourly.reduce((s, x) => s + Math.min(x, cap), 0) / days;
-            const hourShare = o.hourly.length / hours;
-            const dayShare = o.days.size / dayKeys.size;
-            const supplyDays = perDay > 0 ? units / perDay : Infinity;
-            if (dayShare < NONE_DAY_SHARE || perDay < NONE_PER_DAY || hourShare < NONE_HOUR_SHARE) level = LEVEL.none;
-            else if (hourShare >= SELLS_HOUR_SHARE && supplyDays <= SELLS_SUPPLY_DAYS) level = LEVEL.sells;
-            else level = LEVEL.slow;
-            if (o.prices.length) {
-                const prices = [...o.prices].sort((a, b) => a - b);
-                salePrices.set(item, Math.round(prices[Math.floor(prices.length / 2)]));
-            }
+        levels.set(item, o ? levelFor(o.hourly, o.days.size, hours, dayKeys.size, units) : LEVEL.none);
+        if (o && o.prices.length) {
+            const prices = [...o.prices].sort((a, b) => a - b);
+            salePrices.set(item, Math.round(prices[Math.floor(prices.length / 2)]));
         }
-        levels.set(item, level);
     }
     return { levels, salePrices, hours };
+}
+
+// One item's level (see sellLevels): hourly = units sold in each hour that had
+// a sale, salesDays = days with a sale, hours / dayCount = compared hours and
+// days in the window, nearUnits = units listed near the lowest price now.
+// Shared with the offline scoring tool (tools/score-levels.js).
+function levelFor(hourly, salesDays, hours, dayCount, nearUnits) {
+    if (!hourly.length) return LEVEL.none;
+    const sorted = [...hourly].sort((a, b) => a - b);
+    const cap = Math.max(sorted[Math.floor(sorted.length / 2)] * SPIKE_CAP, 1);
+    const perDay = hourly.reduce((s, x) => s + Math.min(x, cap), 0) / (hours / 24);
+    const hourShare = hourly.length / hours;
+    const dayShare = salesDays / dayCount;
+    const supplyDays = perDay > 0 ? nearUnits / perDay : Infinity;
+    if (dayShare < NONE_DAY_SHARE || perDay < NONE_PER_DAY || hourShare < NONE_HOUR_SHARE) return LEVEL.none;
+    if (hourShare >= SELLS_HOUR_SHARE && supplyDays <= SELLS_SUPPLY_DAYS) return LEVEL.sells;
+    return LEVEL.slow;
 }
 
 // Compact daily archive, kept far longer than the snapshots: the history for
@@ -543,4 +547,4 @@ if (require.main === module) {
     main().catch(e => { console.error(`FAILED: ${e.message}`); process.exitCode = 1; });
 }
 
-module.exports = { roundHalfEven, sellLevels, archiveDays, readArchive };
+module.exports = { roundHalfEven, sellLevels, levelFor, archiveDays, readArchive, LEVEL, LEVEL_DAYS, LEVEL_MIN_HOURS, MAX_GAP };

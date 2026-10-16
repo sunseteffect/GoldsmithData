@@ -90,7 +90,12 @@ function DrawLogo([int]$size) {
     $fill.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $fill.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
     $g.DrawLines($fill, $line)
-    $head = [System.Drawing.PointF[]]@((P 112 4), (P 106 24), (P 92 10))
+    # Head centered on the last segment: base centered on the line's end,
+    # pointing along it (18 long, 20 wide)
+    $dx = 98 - 58; $dy = 14 - 46; $len = [Math]::Sqrt($dx * $dx + $dy * $dy)
+    $ux = $dx / $len; $uy = $dy / $len
+    $head = [System.Drawing.PointF[]]@((P (98 + 18 * $ux) (14 + 18 * $uy)),
+        (P (98 - 10 * $uy) (14 + 10 * $ux)), (P (98 + 10 * $uy) (14 - 10 * $ux)))
     $headPen = New-Object System.Drawing.Pen((C "5c420d"), 3)
     $headPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $g.FillPolygon((New-Object System.Drawing.SolidBrush((C "f2cf6a"))), $head)

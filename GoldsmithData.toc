@@ -1,4 +1,4 @@
-## Interface: 120105, 120100
+## Interface: 120107, 120105, 120100
 ## Title: Goldsmith Data
 ## Notes: Daily auction house price data for Goldsmith (region-wide commodities)
 ## Author: sunseteffect

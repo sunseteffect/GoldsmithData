@@ -38,8 +38,11 @@ const LEVEL_DAYS = 7;          // history looked at
 const LEVEL_MIN_HOURS = 72;    // compared hours needed before any levels
 const NEAR_MIN = 1.10;         // "near the lowest price": up to 10% above it
 const SPIKE_CAP = 5;           // an hour counts at most 5x the item's usual selling hour
-const SELLS_HOUR_SHARE = 0.2;  // sells: a sale in 1 hour in 5 or more...
-const SELLS_SUPPLY_DAYS = 7;   // ...and under a week of stock near the lowest price
+const SELLS_HOUR_SHARE = 0.5;  // sells: a sale in half the hours or more...
+const SELLS_SUPPLY_DAYS = 2;   // ...and under 2 days of stock near the lowest price.
+// Was 1 hour in 5 and a week: too loose. Of the user's posts of Sells items
+// (Oct 8-29 2026), those under half the hours sold 0-36% of units, those
+// over half sold 65-74%; with 2+ days of stock ~40% (tools/score-levels.js)
 const NONE_DAY_SHARE = 0.5;    // doesn't sell: sales on under half the days,
 const NONE_PER_DAY = 1;        // or under 1 a day,
 const NONE_HOUR_SHARE = 0.05;  // or in under 1 hour in 20
